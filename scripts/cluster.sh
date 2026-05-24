@@ -31,6 +31,7 @@ Ops:
   ./scripts/cluster.sh failover <standby-location>
   ./scripts/cluster.sh deploy
   ./scripts/cluster.sh validate
+  ./scripts/cluster.sh smoke
 TXT
 }
 
@@ -372,6 +373,14 @@ PY
   [[ $fail -eq 0 ]] || fatal "validation failed"
 }
 
+smoke_test() {
+  log_json info "smoke: help" "smoke"
+  "$0" --help >/dev/null
+  log_json info "smoke: validate" "smoke"
+  "$0" validate
+  log_json info "smoke: done" "smoke"
+}
+
 deploy_all() {
   load_env
   need rsync
@@ -405,6 +414,7 @@ case "$cmd" in
   restore) restore_db "$sub" "$arg1" ;;
   failover) failover_promote "$sub" ;;
   validate) validate_repo ;;
+  smoke) smoke_test ;;
   deploy) deploy_all ;;
   -h|--help|help|"") usage ;;
   *) fatal "unknown command: $cmd" ;;

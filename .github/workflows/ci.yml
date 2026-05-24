@@ -23,3 +23,5 @@ jobs:
         run: mypy monitoring/billing-api/main.py monitoring/billing-collector/collector.py
       - name: Repository validation
         run: ./scripts/cluster.sh validate
+      - name: Script smoke test
+        run: ./scripts/cluster.sh smoke
