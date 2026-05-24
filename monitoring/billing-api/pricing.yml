@@ -1,0 +1,13 @@
+tiers:
+  standard:
+    monthly_base_usd: 0.00
+    per_million_queries_usd: 0.40
+  geo:
+    monthly_base_usd: 5.00
+    per_million_queries_usd: 0.80
+    per_million_geo_hits_usd: 0.20
+  geo-dnssec:
+    monthly_base_usd: 10.00
+    per_million_queries_usd: 0.80
+    per_million_geo_hits_usd: 0.20
+    dnssec_surcharge_usd: 5.00

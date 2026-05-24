@@ -1,5 +1,5 @@
 # TYPE  DATABASE        USER                      ADDRESS                 METHOD
-local   all             all                                               trust
+local   all             all                                               scram-sha-256
 host    all             all                       127.0.0.1/32            scram-sha-256
 host    all             all                       __DOCKER_DNS_SUBNET__   scram-sha-256
 hostssl replication     __REPL_USER__             __WIREGUARD_NETWORK__   scram-sha-256

@@ -1,0 +1,1 @@
+{"title":"dashboard-cluster-overview","schemaVersion":39,"version":1,"refresh":"30s","panels":[{"type":"timeseries","title":"DNS queries/s per node","targets":[{"expr":"rate(pdns_queries[1m])"}]},{"type":"stat","title":"All nodes UP/DOWN","targets":[{"expr":"sum(up{job=~\"pdns.*\"})"}]}]}

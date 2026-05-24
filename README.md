@@ -1,112 +1,96 @@
 # powerdns-geo-cluster
 
-Production-oriented PowerDNS Authoritative GEO DNS cluster with three starting locations:
+Production-ready GEO authoritative DNS cluster using PowerDNS + PostgreSQL streaming replication.
 
-- `eu-ams`, Amsterdam, primary writer
-- `us-nyc`, New York, standby reader
-- `as-teh`, Tehran, standby reader
+## Minimal command surface
 
-The deployment uses Docker Compose, PowerDNS Authoritative, PostgreSQL streaming replication, WireGuard for the normal replication path, restricted public-IP PostgreSQL fallback, encrypted S3 backups, nftables, and a small CLI named `geo-dnsctl`.
-
-## Supported operating model
-
-Write DNS data only on the primary node. The primary PostgreSQL database streams WAL to the standby locations. Each location runs its own PowerDNS Authoritative service and answers public DNS on UDP/TCP 53 from its local database copy.
-
-Normal sync path:
-
-```text
-standby PostgreSQL -> WireGuard tunnel -> primary PostgreSQL
-```
-
-Fallback sync path:
-
-```text
-standby PostgreSQL -> primary public IP TCP/5432 -> primary PostgreSQL
-```
-
-The fallback is not open to the internet. nftables and `pg_hba.conf` restrict it to known node public IP addresses only. PostgreSQL TLS is enabled for both WireGuard and direct-public replication.
-
-## Fast start
-
-Install dependencies on all nodes first:
+All setup and day-to-day operations run through one script:
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y docker.io docker-compose-plugin wireguard wireguard-tools nftables openssl jq curl dnsutils awscli gnupg rsync
+./scripts/cluster.sh --help
 ```
 
-On the first machine, clone or copy this repository, then run:
+Only two scripts exist in the repo:
+- `scripts/cluster.sh`
+- `scripts/lib.sh`
 
+## Topology
+
+```mermaid
+flowchart LR
+  subgraph EU[eu-ams primary]
+    EU_PDNS[PowerDNS]
+    EU_PG[(PostgreSQL primary)]
+    EU_PDNS --> EU_PG
+  end
+  subgraph US[us-nyc standby]
+    US_PDNS[PowerDNS]
+    US_PG[(PostgreSQL standby)]
+    US_PDNS --> US_PG
+  end
+  subgraph AS[as-teh standby]
+    AS_PDNS[PowerDNS]
+    AS_PG[(PostgreSQL standby)]
+    AS_PDNS --> AS_PG
+  end
+  EU_PG -->|WAL over WireGuard| US_PG
+  EU_PG -->|WAL over WireGuard| AS_PG
+  EU_PG -.->|TLS fallback over public 5432| US_PG
+  EU_PG -.->|TLS fallback over public 5432| AS_PG
+  Internet[(Resolvers)] --> EU_PDNS
+  Internet --> US_PDNS
+  Internet --> AS_PDNS
+```
+
+## Step-by-step setup
+
+1. Install dependencies on each node:
 ```bash
-cd powerdns-geo-cluster
+sudo ./scripts/cluster.sh install-deps
+```
+
+2. On control node:
+```bash
 cp env.example .env
-./scripts/setup-cluster.sh
+./scripts/cluster.sh init
 ```
 
-The setup script asks for the primary node, standby nodes, public IPs, WireGuard IPs, SSH information, MaxMind credentials, and S3 backup settings. It generates all per-node files under `config/generated/`, `config/locations/`, and `secrets/`.
+3. Apply WireGuard on each node:
+```bash
+sudo ./scripts/cluster.sh wireguard apply eu-ams
+sudo ./scripts/cluster.sh wireguard apply us-nyc
+sudo ./scripts/cluster.sh wireguard apply as-teh
+```
 
-Start the primary:
+4. Start services (primary first):
+```bash
+./scripts/cluster.sh up eu-ams
+./scripts/cluster.sh up us-nyc
+./scripts/cluster.sh up as-teh
+```
+
+5. Validate health:
+```bash
+./scripts/cluster.sh check eu-ams
+./scripts/cluster.sh replication check eu-ams
+./scripts/cluster.sh validate
+```
+
+## Day-to-day operations
 
 ```bash
-./scripts/node-compose.sh eu-ams up -d --build
+./scripts/cluster.sh status eu-ams
+./scripts/cluster.sh restart us-nyc
+./scripts/cluster.sh backup eu-ams
+./scripts/cluster.sh restore s3://bucket/path/backup.sql.gz.gpg eu-ams
+./scripts/cluster.sh failover us-nyc
+./scripts/cluster.sh monitoring on eu-ams
+./scripts/cluster.sh monitoring off eu-ams
 ```
 
-Start the standby nodes after WireGuard is up and the generated files are copied to each node:
+## Why this is easy and safe
 
-```bash
-./scripts/node-compose.sh us-nyc up -d --build
-./scripts/node-compose.sh as-teh up -d --build
-```
-
-Load the example domain on the primary:
-
-```bash
-./bin/geo-dnsctl add-domain example-geo.test
-./bin/geo-dnsctl add-geo-record example-geo.test www \
-  --eu 203.0.113.10 \
-  --na 198.51.100.10 \
-  --asia 192.0.2.10 \
-  --default 203.0.113.100 \
-  --ttl 60
-```
-
-Validate:
-
-```bash
-./bin/geo-dnsctl validate
-./scripts/healthcheck.sh
-./scripts/sync-zones.sh --check
-./tests/test-geo-routing.sh
-```
-
-Enable firewall:
-
-```bash
-sudo ./scripts/install-nftables.sh eu-ams
-sudo ./scripts/install-nftables.sh us-nyc
-sudo ./scripts/install-nftables.sh as-teh
-```
-
-Back up to encrypted S3:
-
-```bash
-./scripts/backup.sh
-```
-
-Restore to the primary from S3:
-
-```bash
-./scripts/restore.sh s3://YOUR_BUCKET/powerdns-geo-cluster/eu-ams/pdns-eu-ams-YYYYmmddTHHMMSSZ.sql.gz.gpg
-```
-
-## Current documentation references
-
-This project follows these supported product behaviors:
-
-- PowerDNS Authoritative PostgreSQL backend is read-write capable through the API.
-- Lua records support GEO decisions through the GeoIP backend and EDNS Client Subnet.
-- The PowerDNS built-in webserver/API should be bound and ACL-restricted.
-- PostgreSQL streaming replication supports primary/standby operation; `primary_conninfo` uses libpq connection parameters.
-- AWS CLI `s3 cp` supports server-side encryption modes including AES256 and `aws:kms`.
-
-See `docs/` for the detailed production procedure.
+- Single operational interface reduces mistakes.
+- Single-writer primary avoids split-brain changes.
+- Replication is secured via WireGuard and TLS verify-ca.
+- CI validates shell/python/yaml/json on every PR.

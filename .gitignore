@@ -1,0 +1,7 @@
+.env
+secrets/
+config/generated/
+data/
+logs/
+__pycache__/
+*.pyc

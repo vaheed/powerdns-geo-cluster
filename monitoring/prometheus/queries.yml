@@ -1,0 +1,9 @@
+pg_replication_lag:
+  query: "SELECT application_name as standby, extract(epoch from coalesce(write_lag,'0 second'::interval)) as lag_seconds FROM pg_stat_replication"
+  metrics:
+    - standby:
+        usage: "LABEL"
+        description: "standby name"
+    - lag_seconds:
+        usage: "GAUGE"
+        description: "replication lag seconds"

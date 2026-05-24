@@ -4,7 +4,17 @@ set -Eeuo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 log() { printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
-fatal() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+log_json() {
+  local level="$1"; shift
+  local msg="$1"; shift || true
+  local component="${1:-script}"
+  local loc="${LOCATION_NAME:-unknown}"
+  local esc_msg="${msg//\\/\\\\}"
+  esc_msg="${esc_msg//\"/\\\"}"
+  printf '{"ts":"%s","level":"%s","msg":"%s","loc":"%s","component":"%s"}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$level" "$esc_msg" "$loc" "$component"
+}
+fatal() { log_json error "$*" "lib"; printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || fatal "required command not found: $1"; }
 
 load_env() {

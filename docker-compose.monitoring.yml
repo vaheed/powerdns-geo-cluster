@@ -1,0 +1,87 @@
+services:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--web.enable-lifecycle"]
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml.template:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports:
+      - "${PDNS_API_BIND:-127.0.0.1}:9090:9090"
+    networks: [dns_internal]
+    profiles: [monitoring]
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
+      PG_EXPORTER_EXTEND_QUERY_PATH: /etc/postgres_exporter/queries.yml
+    volumes:
+      - ./monitoring/prometheus/queries.yml:/etc/postgres_exporter/queries.yml:ro
+    networks: [dns_internal]
+    profiles: [monitoring]
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    command: ["--path.rootfs=/host", "--collector.textfile.directory=/var/lib/prometheus/textfile"]
+    pid: host
+    network_mode: host
+    volumes:
+      - /:/host:ro,rslave
+      - ./monitoring/textfile:/var/lib/prometheus/textfile
+    profiles: [monitoring]
+
+  wireguard-exporter:
+    image: mindflavor/prometheus-wireguard-exporter:3.6.6
+    cap_add: [NET_ADMIN]
+    volumes:
+      - /proc/net/wireguard:/proc/net/wireguard:ro
+    ports:
+      - "${PDNS_API_BIND:-127.0.0.1}:9586:9586"
+    profiles: [monitoring]
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:latest
+    ports:
+      - "${PDNS_API_BIND:-127.0.0.1}:9115:9115"
+    networks: [dns_internal]
+    profiles: [monitoring]
+
+  grafana:
+    image: grafana/grafana:11.1.4
+    ports:
+      - "${PDNS_API_BIND:-127.0.0.1}:3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks: [dns_internal]
+    profiles: [monitoring]
+
+  billing-collector:
+    build: ./monitoring/billing-collector
+    restart: unless-stopped
+    environment:
+      PDNS_API_URL: http://pdns:8081/metrics
+      PDNS_API_KEY: ${PDNS_API_KEY}
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      LOCATION_NAME: ${LOCATION_NAME}
+    networks: [dns_internal]
+    profiles: [monitoring]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  billing-api:
+    build: ./monitoring/billing-api
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${PDNS_API_BIND:-127.0.0.1}:8088:8088"
+    networks: [dns_internal]
+    profiles: [monitoring]

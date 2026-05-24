@@ -1,0 +1,27 @@
+groups:
+  - name: pdns-geo-alerts
+    rules:
+      - alert: PdnsDown
+        expr: up{job=~"pdns.*"} == 0
+        for: 1m
+      - alert: PostgresReplicationLagHigh
+        expr: pdns_billing_replication_lag_seconds > 30
+        for: 2m
+      - alert: PostgresReplicationSlotBloat
+        expr: pg_replication_slots_active == 0
+        for: 5m
+      - alert: WireGuardPeerStale
+        expr: wireguard_latest_handshake_seconds_ago > 180
+        for: 3m
+      - alert: GeoRoutingMismatch
+        expr: probe_success{job="blackbox-dns"} == 0
+        for: 1m
+      - alert: BackupMissing
+        expr: time() - max_over_time(billing_collector_last_success_ts{component="backup"}[26h]) > 93600
+        for: 5m
+      - alert: DnsQueryRateSpike
+        expr: rate(pdns_queries[1m]) > 5 * avg_over_time(rate(pdns_queries[1m])[5m:1m])
+        for: 2m
+      - alert: BillingDataGap
+        expr: time() - billing_collector_last_success_ts{component="collector"} > 300
+        for: 2m

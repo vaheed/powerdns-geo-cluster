@@ -15,6 +15,7 @@ services:
       - ./config/pdns/geoip-zones.yml:/etc/powerdns/geoip-zones.yml:ro
       - ./data/geoip:/usr/share/GeoIP:ro
       - ./logs/pdns/${LOCATION_NAME}:/var/log/pdns
+      - ./secrets/postgres-tls/ca:/etc/powerdns/tls:ro
     networks:
       - dns_internal
     healthcheck:
@@ -29,7 +30,7 @@ services:
   postgres:
     build:
       context: ./docker/postgres
-    image: powerdns-geo-postgres:16
+    image: ${POSTGRES_IMAGE:-postgres:16-bookworm}
     restart: unless-stopped
     environment:
       LOCATION_NAME: ${LOCATION_NAME}
@@ -38,7 +39,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_REPLICATION_USER: ${POSTGRES_REPLICATION_USER}
-      POSTGRES_REPLICATION_PASSWORD: ${POSTGRES_REPLICATION_PASSWORD}
+      POSTGRES_REPLICATION_PASSWORD_FILE: /run/secrets/postgres_replication_password
       POSTGRES_PRIMARY_HOSTS: ${POSTGRES_PRIMARY_HOSTS:-}
       POSTGRES_PRIMARY_PORTS: ${POSTGRES_PRIMARY_PORTS:-5432}
       POSTGRES_SYNC_SSLMODE: ${POSTGRES_SYNC_SSLMODE:-verify-ca}
@@ -53,7 +54,10 @@ services:
       - ./config/generated/${LOCATION_NAME}/db/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
       - ./config/db/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
       - ./config/db/20-init-primary.sh:/docker-entrypoint-initdb.d/20-init-primary.sh:ro
+      - ./config/db/billing_schema.sql:/docker-entrypoint-initdb.d/30-init-billing.sql:ro
       - ./secrets/postgres-tls/${LOCATION_NAME}:/tls:ro
+    secrets:
+      - postgres_replication_password
     command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
     networks:
       - dns_internal
@@ -68,7 +72,7 @@ services:
 
   geoipupdate:
     image: ${GEOIPUPDATE_IMAGE:-ghcr.io/maxmind/geoipupdate:v7}
-    restart: "no"
+    restart: on-failure:5
     environment:
       GEOIPUPDATE_ACCOUNT_ID: ${MAXMIND_ACCOUNT_ID}
       GEOIPUPDATE_LICENSE_KEY: ${MAXMIND_LICENSE_KEY}
@@ -80,6 +84,10 @@ services:
       - dns_internal
     profiles:
       - geoip
+
+secrets:
+  postgres_replication_password:
+    file: ./secrets/postgres-replication-password
 
 networks:
   dns_internal:

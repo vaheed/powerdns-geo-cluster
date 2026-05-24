@@ -18,14 +18,10 @@ prepare_tls() {
 prepare_tls
 
 if [[ "$LOCATION_ROLE" == "standby" ]]; then
-  if [[ -z "${POSTGRES_PRIMARY_HOSTS:-}" ]]; then
-    echo "POSTGRES_PRIMARY_HOSTS is required on standby nodes" >&2
-    exit 1
-  fi
-  if [[ -z "${REPLICATION_SLOT_NAME:-}" ]]; then
-    echo "REPLICATION_SLOT_NAME is required on standby nodes" >&2
-    exit 1
-  fi
+  [[ -n "${POSTGRES_PRIMARY_HOSTS:-}" ]] || { echo "POSTGRES_PRIMARY_HOSTS is required on standby nodes" >&2; exit 1; }
+  [[ -n "${REPLICATION_SLOT_NAME:-}" ]] || { echo "REPLICATION_SLOT_NAME is required on standby nodes" >&2; exit 1; }
+  [[ -f "${POSTGRES_REPLICATION_PASSWORD_FILE:-}" ]] || { echo "POSTGRES_REPLICATION_PASSWORD_FILE is required" >&2; exit 1; }
+
   if [[ ! -s "$PGDATA/PG_VERSION" ]]; then
     echo "Initializing standby from primary via pg_basebackup"
     rm -rf "$PGDATA"
@@ -35,14 +31,16 @@ if [[ "$LOCATION_ROLE" == "standby" ]]; then
 
     conninfo="host=${POSTGRES_PRIMARY_HOSTS} port=${POSTGRES_PRIMARY_PORTS:-5432} user=${POSTGRES_REPLICATION_USER} dbname=replication application_name=${LOCATION_NAME:-standby} sslmode=${POSTGRES_SYNC_SSLMODE:-verify-ca} sslrootcert=/tls/ca.crt connect_timeout=5 target_session_attrs=read-write"
 
-    export PGPASSWORD="${POSTGRES_REPLICATION_PASSWORD}"
+    export PGPASSWORD="$(cat "$POSTGRES_REPLICATION_PASSWORD_FILE")"
+    sleep_s=2
     until gosu postgres pg_basebackup -D "$PGDATA" -X stream -R -C -S "$REPLICATION_SLOT_NAME" -d "$conninfo"; do
-      echo "pg_basebackup failed; retrying in 5 seconds" >&2
-      sleep 5
+      echo "pg_basebackup failed; retrying in ${sleep_s} seconds" >&2
+      sleep "$sleep_s"
+      sleep_s=$(( sleep_s < 60 ? sleep_s * 2 : 60 ))
     done
     unset PGPASSWORD
 
-    echo "primary_conninfo = '$conninfo password=${POSTGRES_REPLICATION_PASSWORD}'" >> "$PGDATA/postgresql.auto.conf"
+    echo "primary_conninfo = '$conninfo password=$(cat "$POSTGRES_REPLICATION_PASSWORD_FILE")'" >> "$PGDATA/postgresql.auto.conf"
     echo "primary_slot_name = '$REPLICATION_SLOT_NAME'" >> "$PGDATA/postgresql.auto.conf"
     chown -R postgres:postgres "$PGDATA"
     chmod 700 "$PGDATA"
