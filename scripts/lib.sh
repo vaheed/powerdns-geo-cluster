@@ -25,7 +25,7 @@ load_env() {
   source "$PROJECT_ROOT/.env"
   if [[ -n "$loc" ]]; then
     [[ -f "$PROJECT_ROOT/config/locations/$loc.env" ]] || fatal "missing config/locations/$loc.env"
-    # shellcheck disable=SC1091
+    # shellcheck disable=SC1090
     source "$PROJECT_ROOT/config/locations/$loc.env"
   fi
   set +a

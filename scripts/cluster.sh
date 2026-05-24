@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# shellcheck source=./lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 usage() {
@@ -41,7 +42,7 @@ compose_for_loc() {
   set -a
   # shellcheck disable=SC1091
   source "$PROJECT_ROOT/.env"
-  # shellcheck disable=SC1091
+  # shellcheck disable=SC1090
   source "$PROJECT_ROOT/config/locations/$loc.env"
   set +a
   local -a files=( -f docker-compose.yml -f "docker-compose.$loc.yml" )
@@ -106,7 +107,7 @@ wireguard_generate() {
   load_env
   need wg
   mkdir -p "$PROJECT_ROOT/config/generated"
-  mapfile -t locs < <(ls "$PROJECT_ROOT/config/locations"/*.env 2>/dev/null | xargs -n1 basename | sed 's/\.env$//')
+  mapfile -t locs < <(find "$PROJECT_ROOT/config/locations" -maxdepth 1 -type f -name '*.env' -exec basename {} .env \; | sort)
   [[ ${#locs[@]} -gt 0 ]] || fatal "no location env files found"
   for loc in "${locs[@]}"; do
     load_env "$loc"
@@ -118,7 +119,7 @@ wireguard_generate() {
     {
       echo "[Interface]"
       echo "Address = ${WG_IPV4_CIDR}"
-      echo "ListenPort = ${WG_PORT}"
+      echo "ListenPort = ${WG_PORT:-51820}"
       echo "PrivateKey = ${priv_key}"
       echo "MTU = ${WIREGUARD_MTU:-1420}"
       echo
@@ -126,6 +127,7 @@ wireguard_generate() {
         [[ "$peer" == "$loc" ]] && continue
         (
           set -a
+          # shellcheck disable=SC1090
           source "$PROJECT_ROOT/config/locations/$peer.env"
           set +a
           echo "[Peer]"
@@ -157,7 +159,8 @@ tls_generate() {
     # shellcheck disable=SC1090
     source "$envfile"
     set +a
-    local node="$(basename "$envfile" .env)"
+    local node
+    node="$(basename "$envfile" .env)"
     mkdir -p "$tls_root/$node"
     chmod 700 "$tls_root/$node"
     cat > "$tls_root/$node/server.cnf" <<CNF
@@ -227,10 +230,19 @@ setup_init() {
   local nodes=(eu-ams us-nyc as-teh) roles=(primary standby standby) regions=(EU NA AS) cities=(Amsterdam "New York" Tehran) wgips=(10.90.0.10 10.90.0.20 10.90.0.30)
   local node_publics=()
   for i in "${!nodes[@]}"; do
-    local loc="${nodes[$i]}" role="${roles[$i]}" region="${regions[$i]}" city="${cities[$i]}"
+    local loc role region city
+    loc="${nodes[i]}"
+    role="${roles[i]}"
+    region="${regions[i]}"
+    city="${cities[i]}"
     local pub; pub="$(ask "Public DNS IP for $loc" "CHANGE_ME_${loc^^}_PUBLIC_IP")"
-    local wgip; wgip="$(ask "WireGuard IP for $loc" "${wgips[$i]}")"; wgips[$i]="$wgip"
-    local priv="$(wg genkey)" pubkey="$(printf '%s' "$priv" | wg pubkey)"
+    local wgip
+    wgip="$(ask "WireGuard IP for $loc" "${wgips[i]}")"
+    wgips[i]="$wgip"
+    local priv
+    priv="$(wg genkey)"
+    local pubkey
+    pubkey="$(printf '%s' "$priv" | wg pubkey)"
     printf '%s\n' "$priv" > "secrets/wireguard/$loc.private"
     printf '%s\n' "$pubkey" > "secrets/wireguard/$loc.public"
     chmod 600 "secrets/wireguard/$loc.private"
@@ -317,14 +329,21 @@ backup_db() {
   need docker; need gzip; need gpg; need aws
   local rec; rec="$(docker exec "pdns-postgres-$LOCATION_NAME" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA -c "select pg_is_in_recovery();")"
   [[ "${rec// /}" == "f" ]] || fatal "run backups on primary only"
-  local ts="$(date -u +%Y%m%dT%H%M%SZ)" work="$PROJECT_ROOT/${BACKUP_TMP_DIR:-run/backups/tmp}"
+  local ts work
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  work="$PROJECT_ROOT/${BACKUP_TMP_DIR:-run/backups/tmp}"
   mkdir -p "$work"
-  local plain="$work/pdns-${LOCATION_NAME}-${ts}.sql" gz="$plain.gz" enc="$gz.gpg" sha="$enc.sha256"
+  local plain gz enc sha
+  plain="$work/pdns-${LOCATION_NAME}-${ts}.sql"
+  gz="$plain.gz"
+  enc="$gz.gpg"
+  sha="$enc.sha256"
   docker exec "pdns-postgres-$LOCATION_NAME" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=plain --clean --if-exists --no-owner --no-privileges > "$plain"
   gzip -9 "$plain"
   gpg --batch --yes --pinentry-mode loopback --passphrase-file "$BACKUP_GPG_PASSPHRASE_FILE" --symmetric --cipher-algo AES256 -o "$enc" "$gz"
   sha256sum "$enc" > "$sha"
-  local s3_uri="s3://${S3_BUCKET}/${S3_PREFIX}/${LOCATION_NAME}/$(basename "$enc")"
+  local s3_uri
+  s3_uri="s3://${S3_BUCKET}/${S3_PREFIX}/${LOCATION_NAME}/$(basename "$enc")"
   aws s3 cp "$enc" "$s3_uri" --region "$S3_REGION" ${S3_ENDPOINT_URL:+--endpoint-url "$S3_ENDPOINT_URL"}
   aws s3 cp "$sha" "$s3_uri.sha256" --region "$S3_REGION" ${S3_ENDPOINT_URL:+--endpoint-url "$S3_ENDPOINT_URL"}
 }
@@ -334,7 +353,8 @@ restore_db() {
   load_env "$loc"
   [[ "$LOCATION_ROLE" == "primary" ]] || fatal "restore must run on primary"
   need aws; need gpg; need gunzip; need docker
-  local work="$PROJECT_ROOT/run/restore/$(date -u +%Y%m%dT%H%M%SZ)"
+  local work
+  work="$PROJECT_ROOT/run/restore/$(date -u +%Y%m%dT%H%M%SZ)"
   mkdir -p "$work"
   local enc="$work/backup.sql.gz.gpg" gz="$work/backup.sql.gz" sql="$work/backup.sql"
   aws s3 cp "$uri" "$enc" --region "$S3_REGION" ${S3_ENDPOINT_URL:+--endpoint-url "$S3_ENDPOINT_URL"}
@@ -342,7 +362,7 @@ restore_db() {
   gunzip -c "$gz" > "$sql"
   echo "Type RESTORE to continue:"; read -r confirm; [[ "$confirm" == "RESTORE" ]] || fatal "restore cancelled"
   compose_for_loc "$loc" stop pdns
-  cat "$sql" | docker exec -i "pdns-postgres-$LOCATION_NAME" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1
+  docker exec -i "pdns-postgres-$LOCATION_NAME" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 < "$sql"
   compose_for_loc "$loc" start pdns
 }
 
@@ -395,14 +415,14 @@ deploy_all() {
   done
 }
 
-cmd="${1:-}"; sub="${2:-}"; arg1="${3:-}"; arg2="${4:-}"
+cmd="${1:-}"; sub="${2:-}"; arg1="${3:-}"
 case "$cmd" in
   install-deps) require_root_for_firewall; apt-get update; apt-get install -y docker.io docker-compose-plugin wireguard wireguard-tools nftables openssl jq curl dnsutils awscli gnupg rsync python3 python3-pip; systemctl enable --now docker ;;
   init) setup_init ;;
   render) target="${2:-all}"; if [[ "$target" == "all" ]]; then for f in "$PROJECT_ROOT"/config/locations/*.env; do render_one "$(basename "$f" .env)"; done; else render_one "$target"; fi ;;
-  wireguard) [[ "$sub" == "generate" ]] && wireguard_generate || apply_wireguard "$arg1" ;;
-  tls) [[ "$sub" == "generate" ]] && tls_generate || fatal "usage: tls generate" ;;
-  firewall) [[ "$sub" == "apply" ]] && apply_firewall "$arg1" || fatal "usage: firewall apply <location>" ;;
+  wireguard) if [[ "$sub" == "generate" ]]; then wireguard_generate; else apply_wireguard "$arg1"; fi ;;
+  tls) if [[ "$sub" == "generate" ]]; then tls_generate; else fatal "usage: tls generate"; fi ;;
+  firewall) if [[ "$sub" == "apply" ]]; then apply_firewall "$arg1"; else fatal "usage: firewall apply <location>"; fi ;;
   up) compose_for_loc "$sub" up -d --build ;;
   down) compose_for_loc "$sub" down ;;
   restart) compose_for_loc "$sub" down; compose_for_loc "$sub" up -d --build ;;

@@ -31,7 +31,8 @@ if [[ "$LOCATION_ROLE" == "standby" ]]; then
 
     conninfo="host=${POSTGRES_PRIMARY_HOSTS} port=${POSTGRES_PRIMARY_PORTS:-5432} user=${POSTGRES_REPLICATION_USER} dbname=replication application_name=${LOCATION_NAME:-standby} sslmode=${POSTGRES_SYNC_SSLMODE:-verify-ca} sslrootcert=/tls/ca.crt connect_timeout=5 target_session_attrs=read-write"
 
-    export PGPASSWORD="$(cat "$POSTGRES_REPLICATION_PASSWORD_FILE")"
+    PGPASSWORD="$(cat "$POSTGRES_REPLICATION_PASSWORD_FILE")"
+    export PGPASSWORD
     sleep_s=2
     until gosu postgres pg_basebackup -D "$PGDATA" -X stream -R -C -S "$REPLICATION_SLOT_NAME" -d "$conninfo"; do
       echo "pg_basebackup failed; retrying in ${sleep_s} seconds" >&2
