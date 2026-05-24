@@ -1,10 +1,12 @@
-from fastapi import FastAPI, Query
-from fastapi.responses import PlainTextResponse
+from fastapi import FastAPI, Query  # type: ignore[import-not-found]
+from fastapi.responses import PlainTextResponse  # type: ignore[import-not-found]
 import csv
 import io
 import os
-import yaml
-import psycopg2
+from typing import Any
+
+import yaml  # type: ignore[import-untyped]
+import psycopg2  # type: ignore[import-untyped]
 
 app = FastAPI()
 PG = dict(
@@ -13,7 +15,7 @@ PG = dict(
     password=os.getenv("POSTGRES_PASSWORD", ""),
     host=os.getenv("POSTGRES_HOST", "postgres"),
 )
-PRICING = yaml.safe_load(open("/app/pricing.yml", "r", encoding="utf-8"))
+PRICING: dict[str, Any] = yaml.safe_load(open("/app/pricing.yml", "r", encoding="utf-8"))
 
 def conn():
     return psycopg2.connect(**PG)

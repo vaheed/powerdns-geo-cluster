@@ -4,10 +4,11 @@ import json
 import os
 import time
 from datetime import datetime, timezone
+from typing import Any
 
-import psycopg2
-import requests
-from prometheus_client import Counter, Gauge, start_http_server
+import psycopg2  # type: ignore[import-untyped]
+import requests  # type: ignore[import-untyped]
+from prometheus_client import Counter, Gauge, start_http_server  # type: ignore[import-not-found]
 
 PDNS_URL = os.getenv("PDNS_API_URL", "http://pdns:8081/metrics")
 PG_DSN = "dbname={db} user={user} password={pw} host={host}".format(
@@ -28,7 +29,7 @@ last_ok = Gauge("billing_collector_last_success_ts", "Last successful cycle", ["
 repl_lag = Gauge("pdns_billing_replication_lag_seconds", "Replication lag", ["standby"])
 cert_exp = Gauge("pdns_cert_expiry_seconds", "Cert expiry in seconds", ["cert", "node"])
 
-state = {"pdns_total": None, "zones": {}}
+state: dict[str, Any] = {"pdns_total": None, "zones": {}}
 
 def log(level, msg, component="billing-collector", extra=None):
     payload = {
