@@ -1,0 +1,25 @@
+services:
+  pdns:
+    container_name: pdns-auth-us-nyc
+    env_file:
+      - ./.env
+      - ./config/locations/us-nyc.env
+    labels:
+      com.powerdns_geo_cluster.location: "us-nyc"
+      com.powerdns_geo_cluster.service: "pdns-auth"
+  postgres:
+    container_name: pdns-postgres-us-nyc
+    env_file:
+      - ./.env
+      - ./config/locations/us-nyc.env
+    labels:
+      com.powerdns_geo_cluster.location: "us-nyc"
+      com.powerdns_geo_cluster.service: "postgres"
+  geoipupdate:
+    container_name: pdns-geoipupdate-us-nyc
+    env_file:
+      - ./.env
+      - ./config/locations/us-nyc.env
+    labels:
+      com.powerdns_geo_cluster.location: "us-nyc"
+      com.powerdns_geo_cluster.service: "geoipupdate"

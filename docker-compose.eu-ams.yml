@@ -1,0 +1,25 @@
+services:
+  pdns:
+    container_name: pdns-auth-eu-ams
+    env_file:
+      - ./.env
+      - ./config/locations/eu-ams.env
+    labels:
+      com.powerdns_geo_cluster.location: "eu-ams"
+      com.powerdns_geo_cluster.service: "pdns-auth"
+  postgres:
+    container_name: pdns-postgres-eu-ams
+    env_file:
+      - ./.env
+      - ./config/locations/eu-ams.env
+    labels:
+      com.powerdns_geo_cluster.location: "eu-ams"
+      com.powerdns_geo_cluster.service: "postgres"
+  geoipupdate:
+    container_name: pdns-geoipupdate-eu-ams
+    env_file:
+      - ./.env
+      - ./config/locations/eu-ams.env
+    labels:
+      com.powerdns_geo_cluster.location: "eu-ams"
+      com.powerdns_geo_cluster.service: "geoipupdate"

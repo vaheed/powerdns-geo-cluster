@@ -1,0 +1,25 @@
+services:
+  pdns:
+    container_name: pdns-auth-as-teh
+    env_file:
+      - ./.env
+      - ./config/locations/as-teh.env
+    labels:
+      com.powerdns_geo_cluster.location: "as-teh"
+      com.powerdns_geo_cluster.service: "pdns-auth"
+  postgres:
+    container_name: pdns-postgres-as-teh
+    env_file:
+      - ./.env
+      - ./config/locations/as-teh.env
+    labels:
+      com.powerdns_geo_cluster.location: "as-teh"
+      com.powerdns_geo_cluster.service: "postgres"
+  geoipupdate:
+    container_name: pdns-geoipupdate-as-teh
+    env_file:
+      - ./.env
+      - ./config/locations/as-teh.env
+    labels:
+      com.powerdns_geo_cluster.location: "as-teh"
+      com.powerdns_geo_cluster.service: "geoipupdate"

@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+import argparse, json, os, sys, urllib.request, urllib.error, urllib.parse, pathlib, ipaddress
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+def load_env_file(path):
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        line=line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        k,v=line.split('=',1)
+        v=v.strip().strip('"').strip("'")
+        os.environ.setdefault(k.strip(), v)
+
+def load_env():
+    load_env_file(ROOT/'.env')
+    loc=os.environ.get('LOCATION_NAME')
+    if not loc:
+        # Prefer eu-ams for primary operations if present.
+        loc='eu-ams'
+    load_env_file(ROOT/'config'/'locations'/f'{loc}.env')
+
+load_env()
+API_BASE=os.environ.get('PDNS_API_URL','http://127.0.0.1:8081/api/v1/servers/localhost').rstrip('/')
+API_KEY=os.environ.get('PDNS_API_KEY','')
+
+def req(method, path, body=None, ok=(200,201,204)):
+    if not API_KEY:
+        raise SystemExit('PDNS_API_KEY is not set')
+    data=None
+    headers={'X-API-Key': API_KEY, 'Accept': 'application/json'}
+    if body is not None:
+        data=json.dumps(body).encode()
+        headers['Content-Type']='application/json'
+    url=API_BASE+path
+    r=urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(r, timeout=15) as resp:
+            raw=resp.read().decode()
+            if resp.status not in ok:
+                raise SystemExit(f'{method} {path} failed: HTTP {resp.status}: {raw}')
+            return json.loads(raw) if raw else None
+    except urllib.error.HTTPError as e:
+        raw=e.read().decode(errors='replace')
+        raise SystemExit(f'{method} {path} failed: HTTP {e.code}: {raw}')
+
+def fqdn(name, domain=None):
+    if name in ('@','') and domain:
+        return domain.rstrip('.')+'.'
+    if name.endswith('.'):
+        return name
+    if domain and not name.endswith(domain.rstrip('.')):
+        return name+'.'+domain.rstrip('.')+'.'
+    return name.rstrip('.')+'.'
+
+def zone_id(domain):
+    return urllib.parse.quote(domain.rstrip('.')+'.', safe='')
+
+def add_domain(args):
+    domain=args.domain.rstrip('.')+'.'
+    nameservers=[f'ns1.{domain}', f'ns2.{domain}', f'ns3.{domain}']
+    body={'name': domain, 'kind': 'Native', 'nameservers': nameservers}
+    try:
+        req('POST','/zones',body,ok=(201,204))
+    except SystemExit as e:
+        if 'already exists' not in str(e).lower() and '409' not in str(e):
+            raise
+    rrsets=[]
+    ttl=int(args.ttl)
+    ns_ips=[os.environ.get('NS1_IP','203.0.113.53'), os.environ.get('NS2_IP','198.51.100.53'), os.environ.get('NS3_IP','192.0.2.53')]
+    for i,ip in enumerate(ns_ips, start=1):
+        rrsets.append({'name': f'ns{i}.{domain}', 'type':'A', 'ttl':ttl, 'changetype':'REPLACE', 'records':[{'content':ip,'disabled':False}]})
+    req('PATCH', f'/zones/{zone_id(domain)}', {'rrsets': rrsets}, ok=(204,))
+    print(f'created or updated zone {domain}')
+
+def add_record(args):
+    domain=args.domain.rstrip('.')+'.'
+    name=fqdn(args.name, domain)
+    ip_validate(args.type, args.value)
+    rr={'name':name,'type':args.type.upper(),'ttl':int(args.ttl),'changetype':'REPLACE','records':[{'content':args.value,'disabled':False}]}
+    req('PATCH', f'/zones/{zone_id(domain)}', {'rrsets':[rr]}, ok=(204,))
+    print(f'upserted {name} {args.type.upper()} {args.value}')
+
+def ip_validate(rtype, value):
+    rtype=rtype.upper()
+    if rtype == 'A': ipaddress.ip_address(value)
+    if rtype == 'AAAA': ipaddress.ip_address(value)
+
+def add_geo_record(args):
+    for v in [args.eu,args.na,args.asia,args.default]:
+        ipaddress.ip_address(v)
+    domain=args.domain.rstrip('.')+'.'
+    name=fqdn(args.name, domain)
+    lua=("A \";if continent('EU') then return '%s' "
+         "elseif continent('NA') then return '%s' "
+         "elseif continent('AS') then return '%s' "
+         "else return '%s' end\"") % (args.eu,args.na,args.asia,args.default)
+    rr={'name':name,'type':'LUA','ttl':int(args.ttl),'changetype':'REPLACE','records':[{'content':lua,'disabled':False}]}
+    req('PATCH', f'/zones/{zone_id(domain)}', {'rrsets':[rr]}, ok=(204,))
+    print(f'upserted GEO LUA A policy for {name}')
+
+def list_domains(args):
+    zones=req('GET','/zones') or []
+    for z in zones:
+        print(z.get('name',''))
+
+def show_domain(args):
+    z=req('GET', f'/zones/{zone_id(args.domain)}')
+    print(json.dumps(z, indent=2, sort_keys=True))
+
+def delete_domain(args):
+    if not args.yes:
+        raise SystemExit('refusing to delete without --yes')
+    req('DELETE', f'/zones/{zone_id(args.domain)}', ok=(204,))
+    print(f'deleted {args.domain}')
+
+def sync(args):
+    import subprocess
+    subprocess.check_call([str(ROOT/'scripts'/'sync-zones.sh'),'--check'])
+
+def validate(args):
+    errors=[]
+    try:
+        req('GET','/servers/localhost')
+    except SystemExit as e:
+        errors.append(str(e))
+    if not (ROOT/'config'/'pdxns').exists():
+        pass
+    for path in ['.env','docker-compose.yml','config/db/init.sql','config/pdns/pdns.conf.template']:
+        if not (ROOT/path).exists(): errors.append(f'missing {path}')
+    if errors:
+        for e in errors: print('ERROR:', e, file=sys.stderr)
+        return 1
+    print('validation passed: API reachable and required files exist')
+    return 0
+
+def main():
+    p=argparse.ArgumentParser(prog='geo-dnsctl')
+    sub=p.add_subparsers(dest='cmd', required=True)
+    s=sub.add_parser('add-domain'); s.add_argument('domain'); s.add_argument('--ttl', default=300); s.set_defaults(func=add_domain)
+    s=sub.add_parser('add-record'); s.add_argument('domain'); s.add_argument('name'); s.add_argument('type'); s.add_argument('value'); s.add_argument('--ttl', default=300); s.set_defaults(func=add_record)
+    s=sub.add_parser('add-geo-record'); s.add_argument('domain'); s.add_argument('name'); s.add_argument('--eu', required=True); s.add_argument('--na', required=True); s.add_argument('--asia', required=True); s.add_argument('--default', required=True); s.add_argument('--ttl', default=60); s.set_defaults(func=add_geo_record)
+    s=sub.add_parser('list-domains'); s.set_defaults(func=list_domains)
+    s=sub.add_parser('show-domain'); s.add_argument('domain'); s.set_defaults(func=show_domain)
+    s=sub.add_parser('delete-domain'); s.add_argument('domain'); s.add_argument('--yes', action='store_true'); s.set_defaults(func=delete_domain)
+    s=sub.add_parser('sync'); s.set_defaults(func=sync)
+    s=sub.add_parser('validate'); s.set_defaults(func=validate)
+    args=p.parse_args()
+    rc=args.func(args)
+    if isinstance(rc,int): sys.exit(rc)
+
+if __name__=='__main__': main()

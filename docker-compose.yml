@@ -1,0 +1,90 @@
+services:
+  pdns:
+    image: ${PDNS_IMAGE:-powerdns/pdns-auth-49:latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["--config-dir=/etc/powerdns"]
+    ports:
+      - "${PUBLIC_DNS_IP}:53:53/udp"
+      - "${PUBLIC_DNS_IP}:53:53/tcp"
+      - "${PDNS_API_BIND:-127.0.0.1}:${PDNS_API_PORT:-8081}:8081/tcp"
+    volumes:
+      - ./config/generated/${LOCATION_NAME}/pdns/pdns.conf:/etc/powerdns/pdns.conf:ro
+      - ./config/pdns/geoip-zones.yml:/etc/powerdns/geoip-zones.yml:ro
+      - ./data/geoip:/usr/share/GeoIP:ro
+      - ./logs/pdns/${LOCATION_NAME}:/var/log/pdns
+    networks:
+      - dns_internal
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -H 'X-API-Key: ${PDNS_API_KEY}' http://127.0.0.1:8081/api/v1/servers/localhost >/dev/null"]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+
+  postgres:
+    build:
+      context: ./docker/postgres
+    image: powerdns-geo-postgres:16
+    restart: unless-stopped
+    environment:
+      LOCATION_NAME: ${LOCATION_NAME}
+      LOCATION_ROLE: ${LOCATION_ROLE}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_REPLICATION_USER: ${POSTGRES_REPLICATION_USER}
+      POSTGRES_REPLICATION_PASSWORD: ${POSTGRES_REPLICATION_PASSWORD}
+      POSTGRES_PRIMARY_HOSTS: ${POSTGRES_PRIMARY_HOSTS:-}
+      POSTGRES_PRIMARY_PORTS: ${POSTGRES_PRIMARY_PORTS:-5432}
+      POSTGRES_SYNC_SSLMODE: ${POSTGRES_SYNC_SSLMODE:-verify-ca}
+      REPLICATION_SLOT_NAME: ${REPLICATION_SLOT_NAME:-}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${WG_IPV4}:5432:5432/tcp"
+      - "${PUBLIC_DNS_IP}:5432:5432/tcp"
+    volumes:
+      - ./data/postgres/${LOCATION_NAME}:/var/lib/postgresql/data
+      - ./config/generated/${LOCATION_NAME}/db/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./config/generated/${LOCATION_NAME}/db/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./config/db/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+      - ./config/db/20-init-primary.sh:/docker-entrypoint-initdb.d/20-init-primary.sh:ro
+      - ./secrets/postgres-tls/${LOCATION_NAME}:/tls:ro
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
+    networks:
+      - dns_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -h 127.0.0.1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+
+  geoipupdate:
+    image: ${GEOIPUPDATE_IMAGE:-ghcr.io/maxmind/geoipupdate:v7}
+    restart: "no"
+    environment:
+      GEOIPUPDATE_ACCOUNT_ID: ${MAXMIND_ACCOUNT_ID}
+      GEOIPUPDATE_LICENSE_KEY: ${MAXMIND_LICENSE_KEY}
+      GEOIPUPDATE_EDITION_IDS: ${GEOIPUPDATE_EDITION_IDS:-GeoLite2-City}
+      GEOIPUPDATE_FREQUENCY: "72"
+    volumes:
+      - ./data/geoip:/usr/share/GeoIP
+    networks:
+      - dns_internal
+    profiles:
+      - geoip
+
+networks:
+  dns_internal:
+    driver: bridge
+    internal: false
+    ipam:
+      config:
+        - subnet: ${DOCKER_DNS_SUBNET:-172.30.53.0/24}

@@ -1,0 +1,10 @@
+$ORIGIN example-geo.test.
+$TTL 300
+@ IN SOA ns1.example-geo.test. hostmaster.example-geo.test. 2026052501 300 120 1209600 300
+@ IN NS ns1.example-geo.test.
+@ IN NS ns2.example-geo.test.
+@ IN NS ns3.example-geo.test.
+ns1 IN A 203.0.113.53
+ns2 IN A 198.51.100.53
+ns3 IN A 192.0.2.53
+www IN LUA A ";if continent('EU') then return '203.0.113.10' elseif continent('NA') then return '198.51.100.10' elseif continent('AS') then return '192.0.2.10' else return '203.0.113.100' end"

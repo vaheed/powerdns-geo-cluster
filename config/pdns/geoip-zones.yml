@@ -1,0 +1,5 @@
+# Minimal GeoIP backend zone file.
+# This project stores actual customer zones in PostgreSQL and uses Lua records
+# for GEO routing. The geoip backend is launched so Lua helpers such as
+# continent(), country(), and continentCode() can use MaxMind data.
+domains: []

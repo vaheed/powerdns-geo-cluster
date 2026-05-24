@@ -1,0 +1,34 @@
+# Generated and maintained by scripts/setup-cluster.sh and scripts/bootstrap-location.sh.
+# The initial values below are documentation-safe examples. Run setup-cluster.sh before production use.
+cluster:
+  name: powerdns-geo-cluster
+  primary: eu-ams
+  wireguard_network_cidr: 10.90.0.0/24
+  wireguard_port: 51820
+  postgres_public_fallback_enabled: true
+  backup_target: s3
+nodes:
+  - name: eu-ams
+    role: primary
+    region_code: EU
+    city: Amsterdam
+    public_dns_ip: CHANGE_ME_EU_AMS_PUBLIC_IP
+    wireguard_ip: 10.90.0.10
+    ssh_user: root
+    ssh_port: 22
+  - name: us-nyc
+    role: standby
+    region_code: NA
+    city: New York
+    public_dns_ip: CHANGE_ME_US_NYC_PUBLIC_IP
+    wireguard_ip: 10.90.0.20
+    ssh_user: root
+    ssh_port: 22
+  - name: as-teh
+    role: standby
+    region_code: AS
+    city: Tehran
+    public_dns_ip: CHANGE_ME_AS_TEH_PUBLIC_IP
+    wireguard_ip: 10.90.0.30
+    ssh_user: root
+    ssh_port: 22
