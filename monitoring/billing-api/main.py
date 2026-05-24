@@ -68,5 +68,6 @@ def report(account: str, month: str, format: str = "csv"):
     data = summary(account, month)["zones"]
     out = io.StringIO()
     w = csv.DictWriter(out, fieldnames=["zone", "queries_total", "geo_hits", "tier", "charge_usd"])
-    w.writeheader(); w.writerows(data)
+    w.writeheader()
+    w.writerows(data)
     return PlainTextResponse(out.getvalue(), media_type="text/csv")
